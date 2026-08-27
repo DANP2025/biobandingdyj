@@ -6,10 +6,7 @@ import urllib.request
 try:
     import kaleido
 except ImportError:
-    try:
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "kaleido==0.1.0.post1"])
-    except:
-        pass
+    pass
 
 from fpdf import FPDF
 from io import BytesIO
@@ -41,6 +38,18 @@ except Exception:
     pass
 
 def safe_render_fig(fig):
+    # FIX: Configuración robusta de Chromium para Linux
+    try:
+        pio.kaleido.scope.mathjax = None
+        current_args = list(pio.kaleido.scope.chromium_args)
+        flags = ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu", "--single-process"]
+        for flag in flags:
+            if flag not in current_args:
+                current_args.append(flag)
+        pio.kaleido.scope.chromium_args = tuple(current_args)
+    except:
+        pass
+
     last_error = ""
     for attempt in range(3):
         try:
@@ -55,7 +64,7 @@ def safe_render_fig(fig):
 def create_pdf(jug_sel, data_jug, df_filtrado, df_historico):
     pdf = FPDF(orientation="P", unit="mm", format="A4")
     
-    # Global Data Rounding to prevent floating point overflow in Plotly Annotations & Tooltips
+    # Redondeo Global
     for col in ['M.O', 'Gr.T', '% PHV', 'Edad_Decimal', 'Edad PHV']:
         if col in df_filtrado.columns:
             df_filtrado[col] = df_filtrado[col].round(2)
@@ -139,15 +148,14 @@ def create_pdf(jug_sel, data_jug, df_filtrado, df_historico):
     draw_kpi(140, 80, "RITMO MADURATIVO", v_etapa)
     draw_kpi(15, 103, "TALLA (CM)", v_alt)
     draw_kpi(77.5, 103, "MASA CORPORAL", v_peso)
-    # FIX: Restaurado a texto completo. font_size=7.5 para que quepa perfectamente en los 55mm de ancho de la celda.
     draw_kpi(140, 103, "VELOCIDAD DE CRECIMIENTO (CM/A\xd1O)", v_ritmo, font_size=7.5)
 
+    # FIX DE RENDERIZADO: Uso de 'Arial' para evitar que Kaleido colapse al no encontrar la fuente custom en Linux
     color_phv = "#2ECC71" if v_phv < 85 else ("#F1C40F" if v_phv < 95 else "#E74C3C")
     fig_g = go.Figure()
-    fig_g.add_trace(go.Indicator(mode="gauge+number", value=v_phv, domain={'x': [0, 0.45], 'y': [0, 1]}, title={'text': "Estatus Madurativo<br>(%PAH)", 'font': {'size': 20, 'family': 'Agency FB'}}, gauge={'axis': {'range': [80, 100]}, 'bar': {'color': color_phv}}))
-    # FIX: Se ajustan los thresholds clínicos de la velocidad de crecimiento en el PDF a 7.2 cm/año
-    fig_g.add_trace(go.Indicator(mode="gauge+number", value=v_grt, domain={'x': [0.55, 1], 'y': [0, 1]}, title={'text': "Velocidad de Crecimiento<br>(cm/año)", 'font': {'size': 20, 'family': 'Agency FB'}}, gauge={'axis': {'range': [0, 15]}, 'bar': {'color': "black"}, 'steps': [{'range': [0, 5], 'color': "#2ECC71"}, {'range': [5, 7.2], 'color': "#F1C40F"}, {'range': [7.2, 15], 'color': "#E74C3C"}]}))
-    fig_g.update_layout(width=900, height=350, margin=dict(l=60, r=60, t=80, b=30))
+    fig_g.add_trace(go.Indicator(mode="gauge+number", value=v_phv, domain={'x': [0, 0.45], 'y': [0, 1]}, title={'text': "Estatus Madurativo<br>(%PAH)", 'font': {'size': 20, 'family': 'Arial'}}, gauge={'axis': {'range': [80, 100]}, 'bar': {'color': color_phv}}))
+    fig_g.add_trace(go.Indicator(mode="gauge+number", value=v_grt, domain={'x': [0.55, 1], 'y': [0, 1]}, title={'text': "Velocidad de Crecimiento<br>(cm/año)", 'font': {'size': 20, 'family': 'Arial'}}, gauge={'axis': {'range': [0, 15]}, 'bar': {'color': "black"}, 'steps': [{'range': [0, 5], 'color': "#2ECC71"}, {'range': [5, 7.2], 'color': "#F1C40F"}, {'range': [7.2, 15], 'color': "#E74C3C"}]}))
+    fig_g.update_layout(width=900, height=350, margin=dict(l=60, r=60, t=80, b=30), font=dict(family='Arial'))
     
     try:
         img_g_bytes = safe_render_fig(fig_g)
@@ -158,7 +166,7 @@ def create_pdf(jug_sel, data_jug, df_filtrado, df_historico):
     if not df_hist_plot.empty:
         fig_hist = px.scatter(df_hist_plot, x='Edad_Decimal', y='Altura de Pie ', title="Cinética de Crecimiento vs. Edad Decimal")
         fig_hist.update_traces(marker=dict(size=20, color='#1E3A8A'))
-        fig_hist.update_layout(width=960, height=400, title_x=0.5, plot_bgcolor='white', margin=dict(l=60, r=50, t=50, b=60), font=dict(size=16, family='Agency FB'))
+        fig_hist.update_layout(width=960, height=400, title_x=0.5, plot_bgcolor='white', margin=dict(l=60, r=50, t=50, b=60), font=dict(size=16, family='Arial'))
         fig_hist.update_xaxes(showgrid=True, gridcolor='#EFEFEF', title="Edad Cronológica (Años)")
         fig_hist.update_yaxes(showgrid=True, gridcolor='#EFEFEF', title="Talla (cm)")
         
@@ -189,7 +197,7 @@ def create_pdf(jug_sel, data_jug, df_filtrado, df_historico):
     pdf.cell(15, 6, "M.O", border=1, align="C", fill=True)
     pdf.cell(5, 6, "", border=0)
     pdf.cell(45, 6, "Nombre", border=1, fill=True)
-    pdf.cell(15, 6, "% PHA", border=1, align="C", fill=True) # FIX: % PHA
+    pdf.cell(15, 6, "% PAH", border=1, align="C", fill=True)
     pdf.cell(5, 6, "", border=0)
     pdf.cell(45, 6, "Nombre", border=1, fill=True)
     pdf.cell(15, 6, "Cm/Año", border=1, align="C", fill=True)
@@ -199,12 +207,9 @@ def create_pdf(jug_sel, data_jug, df_filtrado, df_historico):
     df_t1 = df_filtrado.copy()
     df_t1['Abs_MO'] = df_t1['M.O'].abs()
     
-    # FIX: Extraemos exclusivamente 1 fila (la del jugador actual)
     top_phv = df_t1.sort_values('Abs_MO').head(1)[['Nombre y Apellido', 'M.O']]
     top_siguen = df_filtrado[df_filtrado['M.O'] < 0].sort_values('Nombre y Apellido').head(1)[['Nombre y Apellido', '% PHV']]
     top_crec = df_filtrado.sort_values('Gr.T', ascending=False).head(1)[['Nombre y Apellido', 'Gr.T']]
-    
-    # FIX: Renderizamos solo 1 fila (range(1)) en lugar de las 10
     for i in range(1):
         n1 = str(top_phv.iloc[i,0])[:22] if i < len(top_phv) else ""
         val1 = top_phv.iloc[i,1] if i < len(top_phv) else np.nan
@@ -253,7 +258,6 @@ def create_pdf(jug_sel, data_jug, df_filtrado, df_historico):
         if v3 != "":
             if val3 < 3: pdf.set_fill_color(46, 204, 113); pdf.set_text_color(0,0,0)
             elif val3 < 5: pdf.set_fill_color(241, 196, 15); pdf.set_text_color(0,0,0)
-            # FIX COLOR PDF: Cambiamos a 7.2 cm/año la alerta neuromúsuclar en tabla
             elif val3 < 7.2: pdf.set_fill_color(230, 126, 34); pdf.set_text_color(255,255,255)
             elif val3 < 9: pdf.set_fill_color(231, 76, 60); pdf.set_text_color(255,255,255)
             else: pdf.set_fill_color(142, 0, 0); pdf.set_text_color(255,255,255)
@@ -269,7 +273,7 @@ def create_pdf(jug_sel, data_jug, df_filtrado, df_historico):
         fig_g1.update_traces(marker=dict(size=16, color='#3498DB', line=dict(width=1, color='white')))
         fig_g1.add_hline(y=7, line_dash="dash", line_color="#E74C3C", line_width=2)
         fig_g1.add_vline(x=0, line_dash="dash", line_color="#E74C3C", line_width=2)
-        fig_g1.update_layout(width=960, height=480, title_x=0.5, plot_bgcolor='white', margin=dict(l=60, r=50, t=50, b=60), font=dict(size=16, family='Agency FB'), xaxis_range=[-3, 3], yaxis_range=[0, 20])
+        fig_g1.update_layout(width=960, height=480, title_x=0.5, plot_bgcolor='white', margin=dict(l=60, r=50, t=50, b=60), font=dict(size=16, family='Arial'), xaxis_range=[-3, 3], yaxis_range=[0, 20])
         fig_g1.update_xaxes(showgrid=True, gridcolor='#EFEFEF', title="Tiempo al PHV (Años)")
         fig_g1.update_yaxes(showgrid=True, gridcolor='#EFEFEF', title="Velocidad de Crecimiento (cm/año)")
         
@@ -288,13 +292,12 @@ def create_pdf(jug_sel, data_jug, df_filtrado, df_historico):
     if not df_bar.empty:
         y_max = max(105, df_bar['% PHV'].max() * 1.05)
         colors_b = ['#2ECC71' if val < 85 else ('#F1C40F' if val < 95 else '#E74C3C') for val in df_bar['% PHV']]
-        # FIX: Etiqueta Y renombrada a % PHA
         fig_b = px.bar(df_bar, x='Nombre y Apellido', y='% PHV', title="Distribución del Estatus Madurativo (%PAH)", labels={'% PHV': '% PHA'})
         fig_b.update_traces(marker_color=colors_b, texttemplate='%{y:.1f}%', textposition='outside')
         fig_b.add_hline(y=85, line_dash="dash", line_color="#2ECC71", line_width=2, layer="below")
         fig_b.add_hline(y=95, line_dash="dash", line_color="#E74C3C", line_width=2, layer="below")
-        fig_b.update_layout(width=960, height=400, title_x=0.5, plot_bgcolor='white', yaxis_range=[60, y_max], margin=dict(l=60, r=50, t=50, b=80), font=dict(size=16, family='Agency FB'))
-        fig_b.update_yaxes(title_text="% PHA", title_font=dict(size=20, weight='bold'))
+        fig_b.update_layout(width=960, height=400, title_x=0.5, plot_bgcolor='white', yaxis_range=[60, y_max], margin=dict(l=60, r=50, t=50, b=80), font=dict(size=16, family='Arial'))
+        fig_b.update_yaxes(title_text="% PHA")
         
         try:
             img_b_bytes = safe_render_fig(fig_b)
@@ -308,7 +311,7 @@ def create_pdf(jug_sel, data_jug, df_filtrado, df_historico):
         fig_c.add_vline(x=0, line_dash="dash", line_color="#E74C3C", line_width=2)
         if not data_jug.empty:
             fig_c.add_scatter(x=data_jug['M.O'], y=data_jug['Gr.T'], mode='markers', marker=dict(size=24, color='#F1C40F', symbol='star', line=dict(width=2, color='black')), name=jug_sel)
-        fig_c.update_layout(width=960, height=480, title_x=0.5, plot_bgcolor='white', xaxis_range=[-3, 3], yaxis_range=[0, 20], margin=dict(l=60, r=50, t=50, b=60), font=dict(size=16, family='Agency FB'))
+        fig_c.update_layout(width=960, height=480, title_x=0.5, plot_bgcolor='white', xaxis_range=[-3, 3], yaxis_range=[0, 20], margin=dict(l=60, r=50, t=50, b=60), font=dict(size=16, family='Arial'))
         fig_c.update_xaxes(showgrid=True, gridcolor='#EFEFEF', title="Tiempo al PHV (Años)")
         fig_c.update_yaxes(showgrid=True, gridcolor='#EFEFEF', title="Velocidad de Crecimiento (cm/año)")
         
