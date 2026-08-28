@@ -1,13 +1,7 @@
-import sys
-import subprocess
 import os
 import urllib.request
-
-try:
-    import kaleido
-except ImportError:
-    pass
-
+import time
+import gc
 from fpdf import FPDF
 from io import BytesIO
 import requests
@@ -16,9 +10,27 @@ import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 import plotly.io as pio
-import streamlit as st
-import time
-import gc
+
+# =========================================================
+# FIX DE ALTA INGENIERÍA PARA KALEIDO 0.2.1 EN PYTHON 3.14
+# Parcheamos globalmente la configuración de Plotly para Linux
+# =========================================================
+try:
+    pio.kaleido.scope.mathjax = None
+    current_args = list(pio.kaleido.scope.chromium_args)
+    flags = [
+        "--no-sandbox", 
+        "--disable-dev-shm-usage", 
+        "--disable-gpu", 
+        "--single-process",
+        "--disable-software-rasterizer"
+    ]
+    for flag in flags:
+        if flag not in current_args:
+            current_args.append(flag)
+    pio.kaleido.scope.chromium_args = tuple(current_args)
+except:
+    pass
 
 if not os.path.exists("Agency.ttf"):
     try:
@@ -26,29 +38,7 @@ if not os.path.exists("Agency.ttf"):
     except:
         pass
 
-try:
-    pio.kaleido.scope.mathjax = None
-    current_args = list(pio.kaleido.scope.chromium_args)
-    flags = ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu", "--single-process", "--disable-software-rasterizer"]
-    for flag in flags:
-        if flag not in current_args:
-            current_args.append(flag)
-    pio.kaleido.scope.chromium_args = tuple(current_args)
-except Exception:
-    pass
-
 def safe_render_fig(fig):
-    try:
-        pio.kaleido.scope.mathjax = None
-        current_args = list(pio.kaleido.scope.chromium_args)
-        flags = ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu", "--single-process"]
-        for flag in flags:
-            if flag not in current_args:
-                current_args.append(flag)
-        pio.kaleido.scope.chromium_args = tuple(current_args)
-    except:
-        pass
-
     last_error = ""
     for attempt in range(3):
         try:
@@ -57,13 +47,13 @@ def safe_render_fig(fig):
             return fig.to_image(format="png", engine="kaleido", scale=1.5)
         except Exception as e:
             last_error = str(e)
-            time.sleep(1.5)
-    raise Exception(f"Kaleido Timeout/Crash: {last_error}")
+            time.sleep(1.0)
+    raise Exception(f"Error Kaleido 0.2.1: {last_error}")
 
 def create_pdf(jug_sel, data_jug, df_filtrado, df_historico):
     pdf = FPDF(orientation="P", unit="mm", format="A4")
     
-    # Redondeo Global
+    # Redondeo para evitar overflow en tooltips del PDF
     for col in ['M.O', 'Gr.T', '% PHV', 'Edad_Decimal', 'Edad PHV']:
         if col in df_filtrado.columns:
             df_filtrado[col] = df_filtrado[col].round(2)
@@ -149,17 +139,20 @@ def create_pdf(jug_sel, data_jug, df_filtrado, df_historico):
     draw_kpi(77.5, 103, "MASA CORPORAL", v_peso)
     draw_kpi(140, 103, "VELOCIDAD DE CRECIMIENTO (CM/A\xd1O)", v_ritmo, font_size=7.5)
 
-    # FIX DE RENDERIZADO: Uso de 'Arial' para evitar que Kaleido colapse al no encontrar la fuente custom en Linux
     color_phv = "#2ECC71" if v_phv < 85 else ("#F1C40F" if v_phv < 95 else "#E74C3C")
     fig_g = go.Figure()
     fig_g.add_trace(go.Indicator(mode="gauge+number", value=v_phv, domain={'x': [0, 0.45], 'y': [0, 1]}, title={'text': "Estatus Madurativo<br>(%PAH)", 'font': {'size': 20, 'family': 'Arial'}}, gauge={'axis': {'range': [80, 100]}, 'bar': {'color': color_phv}}))
     fig_g.add_trace(go.Indicator(mode="gauge+number", value=v_grt, domain={'x': [0.55, 1], 'y': [0, 1]}, title={'text': "Velocidad de Crecimiento<br>(cm/año)", 'font': {'size': 20, 'family': 'Arial'}}, gauge={'axis': {'range': [0, 15]}, 'bar': {'color': "black"}, 'steps': [{'range': [0, 5], 'color': "#2ECC71"}, {'range': [5, 7.2], 'color': "#F1C40F"}, {'range': [7.2, 15], 'color': "#E74C3C"}]}))
-    fig_g.update_layout(width=900, height=350, margin=dict(l=60, r=60, t=80, b=30), font=dict(family='Arial'))
+    fig_g.update_layout(width=900, height=350, margin=dict(l=60, r=60, t=80, b=30))
     
     try:
         img_g_bytes = safe_render_fig(fig_g)
         pdf.image(BytesIO(img_g_bytes), x=10, y=128, w=190)
-    except: pass
+    except Exception as e:
+        pdf.set_xy(10, 140)
+        pdf.set_font("Arial", "I", 8)
+        pdf.set_text_color(255, 0, 0)
+        pdf.multi_cell(190, 5, f"Error Medidores: {str(e)}", align="C")
 
     df_hist_plot = df_historico[df_historico['Nombre y Apellido'] == jug_sel]
     if not df_hist_plot.empty:
@@ -172,7 +165,11 @@ def create_pdf(jug_sel, data_jug, df_filtrado, df_historico):
         try:
             img_hist_bytes = safe_render_fig(fig_hist)
             pdf.image(BytesIO(img_hist_bytes), x=10, y=200, w=190)
-        except: pass
+        except Exception as e:
+            pdf.set_xy(10, 210)
+            pdf.set_font("Arial", "I", 8)
+            pdf.set_text_color(255, 0, 0)
+            pdf.multi_cell(190, 5, f"Error Scatter 1: {str(e)}", align="C")
 
     # =========================================================
     # PÁGINA 2: MATRIZ PLANTEL
@@ -279,7 +276,11 @@ def create_pdf(jug_sel, data_jug, df_filtrado, df_historico):
         try:
             img_g1_bytes = safe_render_fig(fig_g1)
             pdf.image(BytesIO(img_g1_bytes), x=10, y=120, w=190)
-        except: pass
+        except Exception as e:
+            pdf.set_xy(10, 130)
+            pdf.set_font("Arial", "I", 8)
+            pdf.set_text_color(255, 0, 0)
+            pdf.multi_cell(190, 5, f"Error Scatter 2: {str(e)}", align="C")
 
     # =========================================================
     # PÁGINA 3: MONITOR DE MADURACIÓN
@@ -296,12 +297,16 @@ def create_pdf(jug_sel, data_jug, df_filtrado, df_historico):
         fig_b.add_hline(y=85, line_dash="dash", line_color="#2ECC71", line_width=2, layer="below")
         fig_b.add_hline(y=95, line_dash="dash", line_color="#E74C3C", line_width=2, layer="below")
         fig_b.update_layout(width=960, height=400, title_x=0.5, plot_bgcolor='white', yaxis_range=[60, y_max], margin=dict(l=60, r=50, t=50, b=80), font=dict(size=16, family='Arial'))
-        fig_b.update_yaxes(title_text="% PHA")
+        fig_b.update_yaxes(title_text="% PHA", title_font=dict(size=20, weight='bold'))
         
         try:
             img_b_bytes = safe_render_fig(fig_b)
             pdf.image(BytesIO(img_b_bytes), x=10, y=50, w=190)
-        except: pass
+        except Exception as e:
+            pdf.set_xy(10, 60)
+            pdf.set_font("Arial", "I", 8)
+            pdf.set_text_color(255, 0, 0)
+            pdf.multi_cell(190, 5, f"Error Barras: {str(e)}", align="C")
 
     if not df_plot.empty:
         fig_c = px.scatter(df_plot, x='M.O', y='Gr.T', title=f"Ubicación de {jug_sel} en el Plantel")
@@ -319,8 +324,8 @@ def create_pdf(jug_sel, data_jug, df_filtrado, df_historico):
             pdf.image(BytesIO(img_c_bytes), x=10, y=145, w=190)
         except Exception as e:
             pdf.set_xy(10, 160)
-            pdf.set_font("Arial", "B", 10)
+            pdf.set_font("Arial", "I", 8)
             pdf.set_text_color(255, 0, 0)
-            pdf.multi_cell(190, 8, f"Error Render Gráfico 4: {str(e)}", align="C")
+            pdf.multi_cell(190, 5, f"Error Scatter 3: {str(e)}", align="C")
 
     return bytes(pdf.output())
