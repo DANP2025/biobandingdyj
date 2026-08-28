@@ -38,7 +38,6 @@ except Exception:
     pass
 
 def safe_render_fig(fig):
-    # FIX: Configuración robusta de Chromium para Linux
     try:
         pio.kaleido.scope.mathjax = None
         current_args = list(pio.kaleido.scope.chromium_args)
@@ -59,7 +58,7 @@ def safe_render_fig(fig):
         except Exception as e:
             last_error = str(e)
             time.sleep(1.5)
-    raise Exception(f"Kaleido Error: {last_error}")
+    raise Exception(f"Kaleido Timeout/Crash: {last_error}")
 
 def create_pdf(jug_sel, data_jug, df_filtrado, df_historico):
     pdf = FPDF(orientation="P", unit="mm", format="A4")
@@ -318,6 +317,10 @@ def create_pdf(jug_sel, data_jug, df_filtrado, df_historico):
         try:
             img_c_bytes = safe_render_fig(fig_c)
             pdf.image(BytesIO(img_c_bytes), x=10, y=145, w=190)
-        except: pass
+        except Exception as e:
+            pdf.set_xy(10, 160)
+            pdf.set_font("Arial", "B", 10)
+            pdf.set_text_color(255, 0, 0)
+            pdf.multi_cell(190, 8, f"Error Render Gráfico 4: {str(e)}", align="C")
 
     return bytes(pdf.output())
